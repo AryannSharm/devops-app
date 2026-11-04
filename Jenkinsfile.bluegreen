@@ -1,0 +1,53 @@
+pipeline {
+  agent any
+  environment {
+    TAG = "${env.BUILD_NUMBER}"
+  }
+  stages {
+    stage('Checkout') {
+      steps { checkout scm }
+    }
+    stage('Decide colours') {
+      steps {
+        script {
+          def live = sh(script: "kubectl get svc bluegreen-app -o jsonpath='{.spec.selector.version}' 2>/dev/null || true", returnStdout: true).trim()
+          env.LIVE = live ?: 'none'
+          env.IDLE = (live == 'blue') ? 'green' : 'blue'
+          echo "Live: ${env.LIVE}  ->  deploying to: ${env.IDLE}"
+        }
+      }
+    }
+    stage('Build image') {
+      steps {
+        sh '''
+          cd bluegreen
+          if [ "$IDLE" = "blue" ]; then BG="#1d4ed8"; else BG="#15803d"; fi
+          sed -i "s/__COLOR__/$IDLE/g; s/__BG__/$BG/g" index.html
+          docker build -t bluegreen-app:$TAG .
+          kind load docker-image bluegreen-app:$TAG --name devops
+        '''
+      }
+    }
+    stage('Deploy to idle colour') {
+      steps {
+        sh '''
+          sed "s/COLOR/$IDLE/g; s/IMAGE_TAG/$TAG/g" bluegreen/k8s/deployment.yml | kubectl apply -f -
+          kubectl rollout status deployment/app-$IDLE --timeout=120s
+        '''
+      }
+    }
+    stage('Smoke test idle colour') {
+      steps {
+        sh 'kubectl exec deploy/app-$IDLE -- wget -qO- http://localhost | grep -q "$IDLE"'
+      }
+    }
+    stage('Switch traffic') {
+      steps {
+        sh '''
+          kubectl get svc bluegreen-app >/dev/null 2>&1 || kubectl apply -f bluegreen/k8s/service.yml
+          kubectl patch svc bluegreen-app -p '{"spec":{"selector":{"app":"bluegreen-app","version":"'"$IDLE"'"}}}'
+        '''
+      }
+    }
+  }
+}
