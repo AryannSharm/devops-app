@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-COLOR
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: bluegreen-app
+      version: COLOR
+  template:
+    metadata:
+      labels:
+        app: bluegreen-app
+        version: COLOR
+    spec:
+      containers:
+      - name: app
+        image: bluegreen-app:IMAGE_TAG
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 80
